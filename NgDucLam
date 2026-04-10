@@ -1,0 +1,189 @@
+#include <ntddk.h>
+#include <intrin.h>
+#include <immintrin.h>
+
+#define MAX_ENTITIES               8192
+#define SUPREME_ITERATIONS         50000
+#define PLANCK_TIME_STEP           0.0001f
+#define OMNI_LOCK_FORCE            5000.0f
+#define LIGHT_SPEED_LIMIT          250000.0f
+#define ABSOLUTE_ZERO_FRICTION     0.0f
+
+#define IOCTL_SINGULARITY_INJECT   CTL_CODE(FILE_DEVICE_UNKNOWN, 0x1337, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+typedef struct alignas(64) _TENSOR_FIELD_MASTER_12X12 {
+    float tensor[12][12];
+} TENSOR_FIELD_MASTER_12X12;
+
+typedef struct alignas(64) _SINGULARITY_ENTITY_V8 {
+    __m256 pos; 
+    __m256 vel; 
+    __m256 acc; 
+    __m256 head_suction;
+    __m256 predictive_drift;
+    float jitter_gate[4096];
+    uint32_t gate_ptr;
+    float drag_coefficient;
+    float nhay_multiplier;
+    float smoothing_factor;
+    float inject_depth_bias;
+} SINGULARITY_ENTITY_V8;
+
+typedef struct _ULTIMATE_CORE_V8 {
+    SINGULARITY_ENTITY_V8 entities[MAX_ENTITIES];
+    TENSOR_FIELD_MASTER_12X12 master_matrix;
+    volatile float target_x, target_y;
+    volatile float input_dx, input_dy;
+    volatile long atomic_barrier;
+} ULTIMATE_CORE_V8;
+
+static ULTIMATE_CORE_V8* g_OmniCore = nullptr;
+
+FORCEINLINE void _VipBarrierLock(volatile long* b) {
+    while (InterlockedExchange(b, 1) == 1) { _mm_pause(); }
+}
+
+FORCEINLINE void _VipBarrierUnlock(volatile long* b) {
+    InterlockedExchange(b, 0);
+}
+
+FORCEINLINE float _OmniFastInvSqrt(float x) {
+    __m128 in = _mm_set_ss(x);
+    __m128 out = _mm_rsqrt_ss(in);
+    float r;
+    _mm_store_ss(&r, out);
+    return r * (1.5f - (x * 0.5f * r * r));
+}
+
+void _WarpSpaceTime12x12(int id) {
+    auto& ent = g_OmniCore->entities[id];
+    alignas(64) float state[12] = {
+        ent.pos.m256_f32[0], ent.pos.m256_f32[1],
+        ent.vel.m256_f32[0], ent.vel.m256_f32[1],
+        ent.acc.m256_f32[0], ent.acc.m256_f32[1],
+        ent.head_suction.m256_f32[0], ent.head_suction.m256_f32[1],
+        ent.drag_coefficient, ent.nhay_multiplier,
+        ent.smoothing_factor, ent.inject_depth_bias
+    };
+
+    float result[12] = {0};
+    for (int i = 0; i < 12; i++) {
+        __m256 row1 = _mm256_loadu_ps(&g_OmniCore->master_matrix.tensor[i][0]);
+        __m256 st1 = _mm256_loadu_ps(&state[0]);
+        __m256 prod1 = _mm256_mul_ps(row1, st1);
+        
+        __m128 low = _mm256_castps256_ps128(prod1);
+        __m128 high = _mm256_extractf128_ps(prod1, 1);
+        __m128 sum = _mm_add_ps(low, high);
+        sum = _mm_hadd_ps(sum, sum);
+        sum = _mm_hadd_ps(sum, sum);
+        
+        float dot;
+        _mm_store_ss(&dot, sum);
+        for(int j=8; j<12; j++) dot += g_OmniCore->master_matrix.tensor[i][j] * state[j];
+        result[i] = dot;
+    }
+
+    ent.acc.m256_f32[0] = result[4];
+    ent.acc.m256_f32[1] = result[5];
+}
+
+void _DeepInjectAimLogic(int id) {
+    auto& ent = g_OmniCore->entities[id];
+    float dx = g_OmniCore->target_x - ent.pos.m256_f32[0];
+    float dy = g_OmniCore->target_y - ent.pos.m256_f32[1];
+    
+    float inv_dist = _OmniFastInvSqrt(dx*dx + dy*dy + 1e-18f);
+    float suction = OMNI_LOCK_FORCE * (1.0f / (inv_dist + 1e-8f)) * ent.inject_depth_bias;
+
+    ent.head_suction.m256_f32[0] = dx * inv_dist * suction * ent.nhay_multiplier;
+    ent.head_suction.m256_f32[1] = dy * inv_dist * suction * ent.nhay_multiplier;
+}
+
+void _BuffMuotStabilizer(int id) {
+    auto& ent = g_OmniCore->entities[id];
+    ent.jitter_gate[ent.gate_ptr] = ent.acc.m256_f32[0];
+    ent.jitter_gate[ent.gate_ptr + 2048] = ent.acc.m256_f32[1];
+    ent.gate_ptr = (ent.gate_ptr + 1) % 2048;
+
+    __m256 sum_x = _mm256_setzero_ps();
+    __m256 sum_y = _mm256_setzero_ps();
+
+    for (int i = 0; i < 2048; i += 8) {
+        sum_x = _mm256_add_ps(sum_x, _mm256_loadu_ps(&ent.jitter_gate[i]));
+        sum_y = _mm256_add_ps(sum_y, _mm256_loadu_ps(&ent.jitter_gate[i + 2048]));
+    }
+
+    float fx = 0, fy = 0;
+    for(int k=0; k<8; k++) { fx += sum_x.m256_f32[k]; fy += sum_y.m256_f32[k]; }
+    ent.acc.m256_f32[0] = (fx / 2048.0f) * ent.smoothing_factor;
+    ent.acc.m256_f32[1] = (fy / 2048.0f) * ent.smoothing_factor;
+}
+
+void _UltimatePhysicsIntegrator(int count) {
+    _VipBarrierLock(&g_OmniCore->atomic_barrier);
+
+    for (int step = 0; step < SUPREME_ITERATIONS; step++) {
+        for (int i = 0; i < count; i++) {
+            _DeepInjectAimLogic(i);
+
+            float drag_x = -g_OmniCore->entities[i].vel.m256_f32[0] * g_OmniCore->entities[i].drag_coefficient;
+            float drag_y = -g_OmniCore->entities[i].vel.m256_f32[1] * g_OmniCore->entities[i].drag_coefficient;
+
+            float ax = (g_OmniCore->target_x + g_OmniCore->entities[i].head_suction.m256_f32[0] - g_OmniCore->entities[i].pos.m256_f32[0]) * 1000.0f;
+            float ay = (g_OmniCore->target_y + g_OmniCore->entities[i].head_suction.m256_f32[1] - g_OmniCore->entities[i].pos.m256_f32[1]) * 1000.0f;
+
+            g_OmniCore->entities[i].acc.m256_f32[0] = ax + drag_x;
+            g_OmniCore->entities[i].acc.m256_f32[1] = ay + drag_y;
+
+            _WarpSpaceTime12x12(i);
+            _BuffMuotStabilizer(i);
+
+            g_OmniCore->entities[i].vel = _mm256_add_ps(g_OmniCore->entities[i].vel, _mm256_mul_ps(g_OmniCore->entities[i].acc, _mm256_set1_ps(PLANCK_TIME_STEP)));
+            
+            float v_sq = g_OmniCore->entities[i].vel.m256_f32[0] * g_OmniCore->entities[i].vel.m256_f32[0] + g_OmniCore->entities[i].vel.m256_f32[1] * g_OmniCore->entities[i].vel.m256_f32[1];
+            if (v_sq > LIGHT_SPEED_LIMIT * LIGHT_SPEED_LIMIT) {
+                g_OmniCore->entities[i].vel = _mm256_mul_ps(g_OmniCore->entities[i].vel, _mm256_set1_ps(LIGHT_SPEED_LIMIT * _OmniFastInvSqrt(v_sq)));
+            }
+
+            g_OmniCore->entities[i].pos = _mm256_add_ps(g_OmniCore->entities[i].pos, _mm256_mul_ps(g_OmniCore->entities[i].vel, _mm256_set1_ps(PLANCK_TIME_STEP)));
+        }
+        if (step > 5000 && (g_OmniCore->entities[0].acc.m256_f32[0] < 1e-15f)) break;
+    }
+
+    _VipBarrierUnlock(&g_OmniCore->atomic_barrier);
+}
+
+VOID _HyperOverclockThread(PVOID ctx) {
+    KeSetBasePriorityThread(KeGetCurrentThread(), HIGH_PRIORITY);
+    while (TRUE) {
+        _UltimatePhysicsIntegrator(MAX_ENTITIES);
+        LARGE_INTEGER q; q.QuadPart = -1;
+        KeDelayExecutionThread(KernelMode, FALSE, &q);
+    }
+}
+
+NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
+    g_OmniCore = (ULTIMATE_CORE_V8*)ExAllocatePoolWithTag(NonPagedPool, sizeof(ULTIMATE_CORE_V8), 'ULT8');
+    if (!g_OmniCore) return STATUS_INSUFFICIENT_RESOURCES;
+
+    RtlZeroMemory(g_OmniCore, sizeof(ULTIMATE_CORE_V8));
+    
+    for (int i = 0; i < 12; i++) {
+        for (int j = 0; j < 12; j++) {
+            g_OmniCore->master_matrix.tensor[i][j] = (i == j) ? 1.0f : 1e-20f;
+        }
+    }
+
+    for(int i=0; i<MAX_ENTITIES; i++) {
+        g_OmniCore->entities[i].drag_coefficient = ABSOLUTE_ZERO_FRICTION;
+        g_OmniCore->entities[i].nhay_multiplier = 2.5f;
+        g_OmniCore->entities[i].smoothing_factor = 1.0f;
+        g_OmniCore->entities[i].inject_depth_bias = 5.0f;
+    }
+
+    HANDLE h;
+    PsCreateSystemThread(&h, THREAD_ALL_ACCESS, NULL, NULL, NULL, _HyperOverclockThread, NULL);
+
+    return STATUS_SUCCESS;
+}
