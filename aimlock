@@ -1,0 +1,65 @@
+function onRequest(context, request) {
+    request.headers["User-Agent"] = "Mozilla/5.0 (iPhone15,2; iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
+    request.headers["X-Device-Model"] = "iPhone15,2";
+    request.headers["X-OS-Version"] = "18.0";
+    request.headers["X-App-Version"] = "1.105.1";
+    request.headers["X-Platform"] = "iOS";
+    request.headers["X-Forwarded-For"] = "127.0.0.1";
+    request.headers["X-Real-IP"] = "127.0.0.1";
+    request.headers["DNT"] = "1";
+    request.version = "HTTP/2.0";
+    request.headers["Connection"] = "Keep-Alive";
+    request.headers["Keep-Alive"] = "timeout=180, max=5000";
+    request.timeout = 15000;
+    request.headers["Accept-Encoding"] = "gzip, deflate, br";
+    request.headers["Accept"] = "application/json, */*";
+    request.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0";
+    request.headers["Pragma"] = "no-cache";
+    request.headers["If-None-Match"] = "";
+    request.headers["If-Modified-Since"] = "";
+    request.headers["Accept-Language"] = "vi-VN,vi;q=0.9,en-US;q=0.5";
+    request.headers["Upgrade-Insecure-Requests"] = "1";
+    return request;
+}
+
+function onResponse(context, response) {
+    response.statusCode = 200;
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0";
+    response.headers["Expires"] = "0";
+    response.headers["Pragma"] = "no-cache";
+    response.headers["Server"] = "Garena/FF";
+    response.headers["X-Powered-By"] = "FF-Game-Server";
+    response.headers["Connection"] = "keep-alive";
+    response.headers["X-Content-Type-Options"] = "nosniff";
+    response.headers["X-Frame-Options"] = "DENY";
+    response.headers["X-XSS-Protection"] = "1; mode=block";
+    response.headers["Access-Control-Allow-Origin"] = "*";
+    response.headers["Content-Encoding"] = "gzip";
+    if (response.body) {
+        var body = response.body;
+        body = body.replace(/"hitbox":"body"/g, '"hitbox":"head"');
+        body = body.replace(/"hitbox":"leg"/g, '"hitbox":"head"');
+        body = body.replace(/"hitbox":"arm"/g, '"hitbox":"head"');
+        body = body.replace(/"hitbox":"hand"/g, '"hitbox":"head"');
+        body = body.replace(/"hitbox":"foot"/g, '"hitbox":"head"');
+        body = body.replace(/"damage_multiplier":1.0/g, '"damage_multiplier":2.5');
+        body = body.replace(/"damage_multiplier":1.2/g, '"damage_multiplier":2.5');
+        body = body.replace(/"damage_multiplier":0.8/g, '"damage_multiplier":2.5');
+        body = body.replace(/"damage_multiplier":1.5/g, '"damage_multiplier":2.5');
+        body = body.replace(/"recoil":[0-9.]+/g, '"recoil":0.0');
+        body = body.replace(/"spread":[0-9.]+/g, '"spread":0.0');
+        body = body.replace(/"kickback":[0-9.]+/g, '"kickback":0.0');
+        body = body.replace(/"sway":[0-9.]+/g, '"sway":0.0');
+        body = body.replace(/"recoil_x":[0-9.-]+/g, '"recoil_x":0.0');
+        body = body.replace(/"recoil_y":[0-9.-]+/g, '"recoil_y":0.0');
+        body = body.replace(/"ping":[0-9]+/g, '"ping":5');
+        body = body.replace(/"latency":[0-9]+/g, '"latency":5');
+        body = body.replace(/"server_url":"[^"]*"/g, '"server_url":"103.27.124.100"');
+        body = body.replace(/"server_ip":"[^"]*"/g, '"server_ip":"103.27.124.100"');
+        body = body.replace(/"ads_enabled":true/g, '"ads_enabled":false');
+        body = body.replace(/"tracking_enabled":true/g, '"tracking_enabled":false');
+        body = body.replace(/"analytics_enabled":true/g, '"analytics_enabled":false');
+        response.body = body;
+    }
+    return response;
+}
